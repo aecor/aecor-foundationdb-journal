@@ -5,6 +5,8 @@ import java.util.UUID
 import aecor.data._
 import aecor.journal.foundationdb.FoundationdbEventJournal.Serializer.TypeHint
 import aecor.journal.foundationdb.FoundationdbEventJournal.Serializer
+import aecor.journal.foundationdb.client.Transactor
+import aecor.journal.foundationdb.client.interpreters.DefaultDatabase
 import cats.data.NonEmptyVector
 import cats.effect.IO
 import org.scalatest.{BeforeAndAfterAll, FunSuite, Matchers}
@@ -27,7 +29,7 @@ class FoundationdbEventJournalTest extends FunSuite with Matchers with BeforeAnd
     .selectAPIVersion(510)
     .open()
 
-  private val db = new FoundationDB[IO](fdb)
+  private val db = new Transactor[IO](new DefaultDatabase[IO](fdb))
 
   def tagging = Tagging.const[String](EventTag("TestTag"))
   val name = UUID.randomUUID().toString

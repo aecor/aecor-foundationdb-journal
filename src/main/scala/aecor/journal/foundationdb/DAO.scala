@@ -1,6 +1,7 @@
 package aecor.journal.foundationdb
 
 import aecor.journal.foundationdb.FoundationdbEventJournal.Serializer.TypeHint
+import aecor.journal.foundationdb.client.algebra.transaction.{ReadTransactionIO, TransactionIO}
 import cats.effect.Sync
 import cats.Monad
 import cats.implicits._
@@ -65,7 +66,7 @@ class DAO(tableName: String) {
 
   def currentEventsByTag[F[_]: Monad](tag: String, lastProcessedOffset: Option[Versionstamp])
     : Stream[TransactionIO[F, ?], (Versionstamp, String, Long, TypeHint, Array[Byte])] = {
-    val query = lastProcessedOffset match {
+    val query: Stream[ReadTransactionIO[F, ?], KeyValue] = lastProcessedOffset match {
       case Some(versionstamp) =>
         val getBeginKey =
           Stream.eval(
@@ -82,7 +83,7 @@ class DAO(tableName: String) {
       case None =>
         RTIO.getRange[F](tagSubspace.range(Tuple.from(tag)))
     }
-    TIO.withSnapshotS(query).map { kv =>
+    query.usingSnapshot.map { kv =>
       val key = Tuple.fromBytes(kv.getKey)
       val value = Tuple.fromBytes(kv.getValue)
       println(s"$key -> $value")

@@ -4,6 +4,8 @@ import aecor.data._
 import aecor.encoding.{KeyDecoder, KeyEncoder}
 import aecor.journal.foundationdb.FoundationdbEventJournal.Serializer.TypeHint
 import aecor.journal.foundationdb.FoundationdbEventJournal.Serializer
+import aecor.journal.foundationdb.client.Transactor
+import aecor.journal.foundationdb.client.algebra.transaction.TransactionIO
 import aecor.runtime.EventJournal
 import cats.data.NonEmptyVector
 import cats.effect._
@@ -11,6 +13,7 @@ import cats.implicits._
 import com.apple.foundationdb.subspace.Subspace
 import com.apple.foundationdb.tuple.Tuple
 import fs2._
+
 import scala.concurrent.duration.FiniteDuration
 
 object FoundationdbEventJournal {
@@ -25,15 +28,15 @@ object FoundationdbEventJournal {
   final case class Settings(tableName: String, pollingInterval: FiniteDuration)
 
   def apply[F[_]: Timer: ConcurrentEffect, K: KeyEncoder: KeyDecoder, E](
-      db: FoundationDB[F],
+      tx: Transactor[F],
       settings: FoundationdbEventJournal.Settings,
       tagging: Tagging[K],
       serializer: Serializer[E]): FoundationdbEventJournal[F, K, E] =
-    new FoundationdbEventJournal(db, settings, tagging, serializer)
+    new FoundationdbEventJournal(tx, settings, tagging, serializer)
 
 }
 
-final class FoundationdbEventJournal[F[_], K, E](db: FoundationDB[F],
+final class FoundationdbEventJournal[F[_], K, E](db: Transactor[F],
                                                  settings: FoundationdbEventJournal.Settings,
                                                  tagging: Tagging[K],
                                                  serializer: Serializer[E])(
