@@ -16,7 +16,7 @@ object ReaderReadTransaction {
 final class ReaderReadTransaction[F[_]: Applicative, RT <: ReadTransaction[F]]
     extends ReadTransaction[ReaderT[F, RT, ?]] {
 
-  def liftStream[A](f: RT => Stream[F, A]): Stream[ReaderT[F, RT, ?], A] =
+  private def liftStream[A](f: RT => Stream[F, A]): Stream[ReaderT[F, RT, ?], A] =
     Stream.eval(ReaderT(f(_: RT).pure[F])).flatMap(_.translate(ReaderT.liftK[F, RT]))
 
   override def getRange(range: foundationdb.Range,

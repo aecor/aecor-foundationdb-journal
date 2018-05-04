@@ -9,7 +9,9 @@ import com.apple.foundationdb.{KeySelector, KeyValue, MutationType}
 import fs2._
 import cats.implicits._
 
-private[foundationdb] final class DAO[F[_]: Sync](tableName: String, transaction: Transaction[F]) {
+private[foundationdb] final class FoundationdbEventJournalDAO[F[_]: Sync](
+    tableName: String,
+    transaction: Transaction[F]) {
   val eventSubspace = new Subspace(Tuple.from(tableName, "events"))
   val tagSubspace = new Subspace(Tuple.from(tableName, "tags"))
 
@@ -25,14 +27,14 @@ private[foundationdb] final class DAO[F[_]: Sync](tableName: String, transaction
 
   }
 
-  def append(keyString: String,
+  def append(entityKey: String,
              sequenceNr: Long,
              typeHint: TypeHint,
              bytes: Array[Byte]): F[Unit] = {
     val key = eventSubspace
       .pack(
         Tuple
-          .from(keyString, sequenceNr: Number))
+          .from(entityKey, sequenceNr: Number))
     val value = Tuple.from(typeHint, bytes).pack()
     transaction.set(key, value)
   }

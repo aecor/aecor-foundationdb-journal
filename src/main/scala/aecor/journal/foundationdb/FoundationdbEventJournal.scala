@@ -11,8 +11,6 @@ import aecor.runtime.EventJournal
 import cats.data.NonEmptyVector
 import cats.effect._
 import cats.implicits._
-import com.apple.foundationdb.subspace.Subspace
-import com.apple.foundationdb.tuple.Tuple
 import fs2._
 import client.syntax._
 import scala.concurrent.duration._
@@ -50,7 +48,8 @@ final class FoundationdbEventJournal[F[_], K, E](db: Transactor[F],
 
   import settings._
 
-  private val dao = new DAO[TransactionIO[F, ?]](tableName, ReaderTransaction[F])
+  private val dao =
+    new FoundationdbEventJournalDAO[TransactionIO[F, ?]](tableName, ReaderTransaction[F])
 
   private[foundationdb] def dropTable: F[Unit] =
     dao.dropTable.transact(db)
