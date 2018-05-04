@@ -2,10 +2,11 @@ package aecor.journal.foundationdb
 
 import aecor.data._
 import aecor.encoding.{KeyDecoder, KeyEncoder}
-import aecor.journal.foundationdb.FoundationdbEventJournal.Serializer.TypeHint
 import aecor.journal.foundationdb.FoundationdbEventJournal.Serializer
+import aecor.journal.foundationdb.FoundationdbEventJournal.Serializer.TypeHint
 import aecor.journal.foundationdb.client.Transactor
 import aecor.journal.foundationdb.client.algebra.transaction.TransactionIO
+import aecor.journal.foundationdb.client.interpreters.ReaderTransaction
 import aecor.runtime.EventJournal
 import cats.data.NonEmptyVector
 import cats.effect._
@@ -13,8 +14,8 @@ import cats.implicits._
 import com.apple.foundationdb.subspace.Subspace
 import com.apple.foundationdb.tuple.Tuple
 import fs2._
-
-import scala.concurrent.duration.FiniteDuration
+import client.syntax._
+import scala.concurrent.duration._
 
 object FoundationdbEventJournal {
   trait Serializer[A] {
@@ -49,33 +50,37 @@ final class FoundationdbEventJournal[F[_], K, E](db: Transactor[F],
 
   import settings._
 
-  val eventSubspace = new Subspace(Tuple.from(tableName, "events"))
-  val tagSubspace = new Subspace(Tuple.from(tableName, "tags"))
-
-  val dao = new DAO(tableName)
+  private val dao = new DAO[TransactionIO[F, ?]](tableName, ReaderTransaction[F])
 
   private[foundationdb] def dropTable: F[Unit] =
-    TIO.set[F](eventSubspace.pack(), Tuple.from().pack()).transact(db)
+    dao.dropTable.transact(db)
 
   def appendTIO(entityKey: K, offset: Long, events: NonEmptyVector[E]): TransactionIO[F, Unit] = {
+
     val keyString = encodeKey(entityKey)
-    for {
-      currentVersion <- dao.getAggregateVersion[F](keyString).asTransactionIO
-      nextVersion = currentVersion + 1
-      _ <- if (nextVersion == offset)
-        events.traverseWithIndexM {
-          case (e, idx) =>
-            val (typeHint, bytes) = serializer.serialize(e)
-            val tags = tagging.tag(entityKey)
-            dao.append[F](keyString, nextVersion + idx, typeHint, bytes) >>
-              tags.toVector.traverse { x =>
-                dao.tag[F](x.value, idx, keyString, nextVersion + idx, typeHint, bytes)
-              }
-        } else
-        TIO.raiseError[F, Unit](
-          new IllegalArgumentException(
-            s"Can not append event at [$offset], current version is [$currentVersion]"))
-    } yield ()
+    dao
+      .getAggregateVersion(keyString)
+      .flatMap { currentVersion =>
+        val nextVersion = currentVersion + 1
+        if (nextVersion == offset)
+          Stream.eval {
+            events.traverseWithIndexM {
+              case (e, idx) =>
+                val (typeHint, bytes) = serializer.serialize(e)
+                val tags = tagging.tag(entityKey)
+                dao.append(keyString, nextVersion + idx, typeHint, bytes) >>
+                  tags.toVector.traverse { x =>
+                    dao.tag(x.value, idx, keyString, nextVersion + idx, typeHint, bytes)
+                  }
+            }
+          } else
+          Stream.raiseError(
+            new IllegalArgumentException(
+              s"Can not append event at [$offset], current version is [$currentVersion]"))
+      }
+      .compile
+      .drain
+
   }
 
   override def append(entityKey: K, offset: Long, events: NonEmptyVector[E]): F[Unit] =
@@ -86,7 +91,7 @@ final class FoundationdbEventJournal[F[_], K, E](db: Transactor[F],
 
   override def foldById[S](key: K, offset: Long, zero: S)(f: (S, E) => Folded[S]): F[Folded[S]] =
     dao
-      .getById[F](encodeKey(key), offset)
+      .getById(encodeKey(key), offset)
       .transact(db)
       .map(deserialize_)
       .evalMap(F.fromEither)
@@ -104,19 +109,19 @@ final class FoundationdbEventJournal[F[_], K, E](db: Transactor[F],
 
   def currentEventsByTag(tag: EventTag, offset: Offset): Stream[F, (Offset, EntityEvent[K, E])] =
     dao
-      .currentEventsByTag[F](tag.value, offset.value)
+      .currentEventsByTag(tag.value, offset.value)
       .transact(db)
-      .map {
+      .evalMap {
         case (eventOffset, keyString, seqNr, typeHint, bytes) =>
-          decodeKey(keyString)
-            .toRight(new IllegalArgumentException(s"Can't decode key [$keyString]"))
-            .flatMap { key =>
-              serializer.deserialize(typeHint, bytes).map { a =>
-                (Offset(Some(eventOffset)), EntityEvent(key, seqNr, a))
+          F.fromEither {
+            decodeKey(keyString)
+              .toRight(new IllegalArgumentException(s"Can't decode key [$keyString]"))
+              .flatMap { key =>
+                serializer.deserialize(typeHint, bytes).map { a =>
+                  (Offset(Some(eventOffset)), EntityEvent(key, seqNr, a))
+                }
               }
-            }
-
+          }
       }
-      .evalMap(F.fromEither)
 
 }

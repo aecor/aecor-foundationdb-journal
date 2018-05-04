@@ -1,6 +1,5 @@
 package aecor.journal.foundationdb.client
 
-import aecor.journal.foundationdb.RTIO
 import aecor.journal.foundationdb.client.algebra.database.Database
 import aecor.journal.foundationdb.client.algebra.transaction.{
   ReadTransactionIO,
@@ -19,10 +18,10 @@ final class Transactor[F[_]](db: Database[F])(implicit F: ConcurrentEffect[F]) {
     prepareTransact(fa)(FunctionK.id)
 
   def transactRead[A](fa: ReadTransactionIO[F, A]): F[A] =
-    prepareTransact(fa)(RTIO.toTransactionIOK)
+    prepareTransact(fa)(ReadTransactionIO.toTransactionIOK)
 
   def transactReadStream[A](stream: Stream[ReadTransactionIO[F, ?], A]): Stream[F, A] =
-    prepareTransactStream(stream)(RTIO.toTransactionIOK)
+    prepareTransactStream(stream)(ReadTransactionIO.toTransactionIOK)
 
   def transactStream[A](stream: Stream[TransactionIO[F, ?], A]): Stream[F, A] =
     prepareTransactStream(stream)(FunctionK.id)
