@@ -5,7 +5,7 @@ import aecor.journal.foundationdb.client.algebra.transaction.Transaction
 import cats.effect.ConcurrentEffect
 import com.apple.foundationdb.{Database => Db}
 
-class DefaultDatabase[F[_]](db: Db)(implicit F: ConcurrentEffect[F]) extends Database[F] {
+final class DefaultDatabase[F[_]](db: Db)(implicit F: ConcurrentEffect[F]) extends Database[F] {
   def createTransaction: F[Transaction[F]] =
     F.delay(new DefaultTransaction[F](db.createTransaction()))
 

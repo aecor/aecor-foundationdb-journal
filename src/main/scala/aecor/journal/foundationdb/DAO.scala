@@ -86,7 +86,6 @@ class DAO(tableName: String) {
     query.usingSnapshot.map { kv =>
       val key = Tuple.fromBytes(kv.getKey)
       val value = Tuple.fromBytes(kv.getValue)
-      println(s"$key -> $value")
       (key.getVersionstamp(3),
        value.getString(0),
        value.getLong(1),

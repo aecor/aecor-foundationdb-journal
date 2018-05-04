@@ -37,12 +37,14 @@ final class Transactor[F[_]](db: Database[F])(implicit F: ConcurrentEffect[F]) {
 
   private def prepareTransactStream[G[_], A](stream: Stream[G, A])(
       f: G ~> TransactionIO[F, ?]): Stream[F, A] = {
-    def translator(tx: Transaction[F]) = new (G ~> F) {
+    def gf(tx: Transaction[F]) = new (G ~> F) {
       override def apply[X](fa: G[X]): F[X] = f(fa).run(tx)
     }
     Stream.bracket(db.createTransaction)(
-      tx => stream.translate(translator(tx)) ++ Stream.eval(tx.commit).drain,
+      tx => stream.translate(gf(tx)) ++ Stream.eval(tx.commit).drain,
       _.close
     )
   }
 }
+
+object Transactor {}

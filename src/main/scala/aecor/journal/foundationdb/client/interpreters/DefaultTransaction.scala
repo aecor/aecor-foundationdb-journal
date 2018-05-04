@@ -1,6 +1,6 @@
 package aecor.journal.foundationdb.client.interpreters
 
-import aecor.journal.foundationdb.client.algebra.transaction.Transaction
+import aecor.journal.foundationdb.client.algebra.transaction.{ReadTransaction, Transaction}
 import aecor.journal.foundationdb.client.interpreters.ConversionUtil._
 import cats.effect._
 import cats.implicits._
@@ -11,7 +11,7 @@ final class DefaultTransaction[F[_]](tx: Tx)(implicit F: Concurrent[F])
     with Transaction[F] {
 
   def watch(key: Array[Byte]): F[F[Unit]] =
-    F.delay(deferFuture(tx.watch(key)).void)
+    F.delay(deferCompletableFuture(tx.watch(key)).void)
 
   def set(key: Array[Byte], value: Array[Byte]): F[Unit] =
     F.delay(tx.set(key, value))
@@ -21,9 +21,10 @@ final class DefaultTransaction[F[_]](tx: Tx)(implicit F: Concurrent[F])
   def mutate(mutationType: MutationType, key: Array[Byte], value: Array[Byte]): F[Unit] =
     F.delay(tx.mutate(mutationType, key, value))
 
-  def commit: F[Unit] = deferFuture[F, Void](tx.commit()).void
+  def commit: F[Unit] = deferCompletableFuture[F, Void](tx.commit()).void
+
   def close: F[Unit] = F.delay(tx.close())
 
-  def snapshot: F[aecor.journal.foundationdb.client.algebra.transaction.ReadTransaction[F]] =
+  def snapshot: F[ReadTransaction[F]] =
     F.delay(new DefaultReadTransaction[F](tx.snapshot()))
 }
