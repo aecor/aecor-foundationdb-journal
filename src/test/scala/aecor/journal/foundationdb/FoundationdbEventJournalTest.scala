@@ -96,18 +96,13 @@ class FoundationdbEventJournalTest extends FunSuite with Matchers with BeforeAnd
   test("Journal emits current events by tag from non zero offset") {
     val x = journal
       .currentEventsByTag(tagging.tag, Offset.zero)
-      .take(5)
+      .take(2)
       .map(_._1)
+      .lastOr(Offset.zero)
+      .flatMap(journal.currentEventsByTag(tagging.tag, _))
+      .map(_._2)
       .compile
-      .last
-      .map(_.getOrElse(Offset.zero))
-      .flatMap { off =>
-        journal
-          .currentEventsByTag(tagging.tag, off)
-          .map(_._2)
-          .compile
-          .fold(Vector.empty[EntityEvent[String, String]])(_ :+ _)
-      }
+      .fold(Vector.empty[EntityEvent[String, String]])(_ :+ _)
 
     val expected =
       Vector(EntityEvent("a", 3, "3"), EntityEvent("b", 1, "b1"), EntityEvent("a", 4, "a4"))
@@ -143,25 +138,20 @@ class FoundationdbEventJournalTest extends FunSuite with Matchers with BeforeAnd
     assert(x.unsafeRunSync() == expected)
   }
 
-  test("Journal continuosly emits events by tag from non zero offset exclusive") {
+  test("Journal continuously emits events by tag from non zero offset exclusive") {
     val appendEvent =
       journal.append("a", 5L, NonEmptyVector.of("a5"))
 
     val foldEvents = journal
       .currentEventsByTag(tagging.tag, Offset.zero)
-      .take(7)
+      .take(5)
       .map(_._1)
+      .lastOr(Offset.zero)
+      .flatMap(journal.eventsByTag(tagging.tag, _))
+      .take(2)
+      .map(_._2)
       .compile
-      .last
-      .map(_.getOrElse(Offset.zero))
-      .flatMap { off =>
-        journal
-          .eventsByTag(tagging.tag, off)
-          .take(2)
-          .map(_._2)
-          .compile
-          .fold(Vector.empty[EntityEvent[String, String]])(_ :+ _)
-      }
+      .fold(Vector.empty[EntityEvent[String, String]])(_ :+ _)
 
     val x = for {
       fiber <- foldEvents.start
@@ -177,25 +167,32 @@ class FoundationdbEventJournalTest extends FunSuite with Matchers with BeforeAnd
     assert(x.unsafeRunSync() == expected)
   }
 
-//  test("Journal correctly uses offset store for current events by tag") {
-//    val x = for {
-//      os <- TestOffsetStore(Map(TagConsumer(tagging.tag, consumerId) -> Offset(3L)))
-//      runOnce = fs2.Stream
-//        .force(
-//          journal
-//            .withOffsetStore(os)
-//            .currentEventsByTag(tagging.tag, consumerId))
-//        .evalMap(_.commit)
-//        .as(1)
-//        .compile
-//        .fold(0)(_ + _)
-//      processed1 <- runOnce
-//      _ <- journal.append("a", 6L, NonEmptyVector.of("a6"))
-//      processed2 <- runOnce
-//    } yield (processed1, processed2)
-//
-//    assert(x.unsafeRunSync == ((4, 1)))
-//  }
+  test("Journal correctly uses offset store for current events by tag") {
+    val x = for {
+      offset <- journal
+        .currentEventsByTag(tagging.tag, Offset.zero)
+        .take(3)
+        .map(_._1)
+        .compile
+        .last
+        .map(_.getOrElse(Offset.zero))
+      os <- TestOffsetStore(Map(TagConsumer(tagging.tag, consumerId) -> offset))
+      runOnce = fs2.Stream
+        .force(
+          journal
+            .withOffsetStore(os)
+            .currentEventsByTag(tagging.tag, consumerId))
+        .evalMap(_.commit)
+        .as(1)
+        .compile
+        .fold(0)(_ + _)
+      processed1 <- runOnce
+      _ <- journal.append("a", 6L, NonEmptyVector.of("a6"))
+      processed2 <- runOnce
+    } yield (processed1, processed2)
+
+    assert(x.unsafeRunSync == ((4, 1)))
+  }
 
   override protected def afterAll(): Unit = {
     journal.dropTable.unsafeRunSync()

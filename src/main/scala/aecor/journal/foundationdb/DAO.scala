@@ -67,14 +67,18 @@ class DAO(tableName: String) {
     : Stream[TransactionIO[F, ?], (Versionstamp, String, Long, TypeHint, Array[Byte])] = {
     val query = lastProcessedOffset match {
       case Some(versionstamp) =>
-        val getKey =
-          RTIO.getKey[F](
-            KeySelector.firstGreaterThan(tagSubspace.pack(Tuple.from(tag, versionstamp))))
-        Stream
-          .eval[ReadTransactionIO[F, ?], Array[Byte]](getKey)
-          .flatMap { begin =>
-            RTIO.getRange(Range.startsWith(begin))
-          }
+        val getBeginKey =
+          Stream.eval(
+            RTIO.getKey[F](
+              KeySelector.firstGreaterThan(tagSubspace.pack(Tuple.from(tag, versionstamp)))))
+
+        val getEndKey =
+          RTIO
+            .getRange[F](tagSubspace.range(Tuple.from(tag)), 1, reverse = true)
+            .evalMap(x => RTIO.getKey[F](KeySelector.firstGreaterThan(x.getKey)))
+
+        getBeginKey.zipWith(getEndKey)(RTIO.getRange[F]).flatten
+
       case None =>
         RTIO.getRange[F](tagSubspace.range(Tuple.from(tag)))
     }
