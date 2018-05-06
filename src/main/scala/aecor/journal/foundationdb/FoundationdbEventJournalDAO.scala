@@ -2,16 +2,13 @@ package aecor.journal.foundationdb
 
 import aecor.journal.foundationdb.FoundationdbEventJournal.Serializer.TypeHint
 import aecor.journal.foundationdb.client.algebra.transaction.{ReadTransaction, Transaction}
-import cats.effect.Sync
 import com.apple.foundationdb.subspace.Subspace
 import com.apple.foundationdb.tuple.{Tuple, Versionstamp}
 import com.apple.foundationdb.{KeySelector, KeyValue, MutationType}
 import fs2._
-import cats.implicits._
 
-private[foundationdb] final class FoundationdbEventJournalDAO[F[_]: Sync](
-    tableName: String,
-    transaction: Transaction[F]) {
+private[foundationdb] final class FoundationdbEventJournalDAO[F[_]](tableName: String,
+                                                                    transaction: Transaction[F]) {
   val eventSubspace = new Subspace(Tuple.from(tableName, "events"))
   val tagSubspace = new Subspace(Tuple.from(tableName, "tags"))
 
