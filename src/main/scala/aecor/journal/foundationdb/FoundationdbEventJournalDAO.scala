@@ -2,18 +2,21 @@ package aecor.journal.foundationdb
 
 import aecor.journal.foundationdb.FoundationdbEventJournal.Serializer.TypeHint
 import aecor.journal.foundationdb.client.algebra.transaction.{ReadTransaction, Transaction}
+import cats.FlatMap
 import com.apple.foundationdb.subspace.Subspace
 import com.apple.foundationdb.tuple.{Tuple, Versionstamp}
 import com.apple.foundationdb.{KeySelector, KeyValue, MutationType}
 import fs2._
+import cats.implicits._
 
-private[foundationdb] final class FoundationdbEventJournalDAO[F[_]](tableName: String,
-                                                                    transaction: Transaction[F]) {
+private[foundationdb] final class FoundationdbEventJournalDAO[F[_]: FlatMap](
+    tableName: String,
+    transaction: Transaction[F]) {
   val eventSubspace = new Subspace(Tuple.from(tableName, "events"))
   val tagSubspace = new Subspace(Tuple.from(tableName, "tags"))
 
   def dropTable: F[Unit] =
-    transaction.set(eventSubspace.pack(), Tuple.from().pack())
+    transaction.clear(eventSubspace.range()) >> transaction.clear(tagSubspace.range())
 
   def getAggregateVersion(key: String): Stream[F, Long] = {
     val subspace = eventSubspace.subspace(Tuple.from(key))
@@ -48,32 +51,22 @@ private[foundationdb] final class FoundationdbEventJournalDAO[F[_]](tableName: S
     transaction.mutate(MutationType.SET_VERSIONSTAMPED_KEY, key, value)
   }
 
-  def getById(keyString: String, sequenceNr: Long): Stream[F, (TypeHint, Array[Byte])] =
-    getAggregateVersion(keyString).flatMap { lastSeqNr =>
-      val begin = eventSubspace.subspace(Tuple.from(keyString, sequenceNr: Number)).pack()
-      val end = eventSubspace.subspace(Tuple.from(keyString, (lastSeqNr + 1L): Number)).pack()
-      transaction
-        .getRange(begin, end)
-        .map(x => Tuple.fromBytes(x.getValue))
-        .map(x => (x.getString(0), x.getBytes(1)))
-    }
+  def getById(keyString: String, sequenceNr: Long): Stream[F, (TypeHint, Array[Byte])] = {
+    val begin = eventSubspace.pack(Tuple.from(keyString, sequenceNr: Number))
+    val end = eventSubspace.range(Tuple.from(keyString)).end
+    transaction
+      .getRange(begin, end)
+      .map(x => Tuple.fromBytes(x.getValue))
+      .map(x => (x.getString(0), x.getBytes(1)))
+  }
 
   def currentEventsByTag(tag: String, lastProcessedOffset: Option[Versionstamp])
     : Stream[F, (Versionstamp, String, Long, TypeHint, Array[Byte])] = {
     def query(snapshot: ReadTransaction[F]): Stream[F, KeyValue] = lastProcessedOffset match {
       case Some(versionstamp) =>
-        val getBeginKey =
-          Stream.eval(
-            transaction.getKey(
-              KeySelector.firstGreaterThan(tagSubspace.pack(Tuple.from(tag, versionstamp)))))
-
-        val getEndKey =
-          snapshot
-            .getRange(tagSubspace.range(Tuple.from(tag)), 1, reverse = true)
-            .evalMap(x => snapshot.getKey(KeySelector.firstGreaterThan(x.getKey)))
-
-        getBeginKey.zipWith(getEndKey)(snapshot.getRange).flatMap(x => x)
-
+        val begin = KeySelector.firstGreaterThan(tagSubspace.pack(Tuple.from(tag, versionstamp)))
+        val end = KeySelector.firstGreaterThan(tagSubspace.range(Tuple.from(tag)).end)
+        snapshot.getRange(begin, end)
       case None =>
         snapshot.getRange(tagSubspace.range(Tuple.from(tag)))
     }
