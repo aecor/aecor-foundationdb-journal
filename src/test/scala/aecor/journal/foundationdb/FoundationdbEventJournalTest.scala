@@ -6,12 +6,10 @@ import aecor.data._
 import aecor.journal.foundationdb.FoundationdbEventJournal.Serializer.TypeHint
 import aecor.journal.foundationdb.FoundationdbEventJournal.Serializer
 import aecor.journal.foundationdb.client.Transactor
-import aecor.journal.foundationdb.client.interpreters.DefaultDatabase
 import cats.data.NonEmptyVector
 import cats.effect.IO
 import org.scalatest.{BeforeAndAfterAll, FunSuite, Matchers}
 import cats.implicits._
-import com.apple.foundationdb.FDB
 
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration._
@@ -25,11 +23,7 @@ class FoundationdbEventJournalTest extends FunSuite with Matchers with BeforeAnd
       Right(new String(bytes, java.nio.charset.StandardCharsets.UTF_8))
   }
 
-  val fdb = FDB
-    .selectAPIVersion(510)
-    .open()
-
-  private val db = new Transactor[IO](new DefaultDatabase[IO](fdb))
+  private val db = Transactor.create[IO].unsafeRunSync()
 
   def tagging = Tagging.const[String](EventTag("TestTag"))
   val name = UUID.randomUUID().toString
@@ -198,7 +192,7 @@ class FoundationdbEventJournalTest extends FunSuite with Matchers with BeforeAnd
 
   override protected def afterAll(): Unit = {
     journal.dropTable.unsafeRunSync()
-    fdb.close()
+    db.close.unsafeRunSync()
   }
 
 }

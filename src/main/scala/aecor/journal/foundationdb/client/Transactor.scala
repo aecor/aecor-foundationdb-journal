@@ -1,16 +1,21 @@
 package aecor.journal.foundationdb.client
 
+import java.net.InetSocketAddress
+import java.util.UUID
+
 import aecor.journal.foundationdb.client.algebra.database.Database
 import aecor.journal.foundationdb.client.algebra.transaction.{
   ReadTransactionIO,
   Transaction,
   TransactionIO
 }
+import aecor.journal.foundationdb.client.interpreters.DefaultDatabase
 import cats.arrow.FunctionK
 import cats.effect.ConcurrentEffect
 import cats.effect.ExitCase.Completed
 import cats.implicits._
 import cats.~>
+import com.apple.foundationdb.FDB
 import fs2.Stream
 
 final class Transactor[F[_]](db: Database[F])(implicit F: ConcurrentEffect[F]) {
@@ -44,6 +49,26 @@ final class Transactor[F[_]](db: Database[F])(implicit F: ConcurrentEffect[F]) {
       _.close
     )
   }
+  def close: F[Unit] = db.close
 }
 
-object Transactor {}
+object Transactor {
+  def create[F[_]](description: String, id: String, nodes: Set[InetSocketAddress])(
+      implicit F: ConcurrentEffect[F]): F[Transactor[F]] =
+    F.delay {
+      val instanceId = UUID.randomUUID().toString
+      val clusterFileName = s"$instanceId.fdb.cluster"
+      import java.io._
+      val pw = new PrintWriter(new File(clusterFileName))
+      pw.write(
+        s"$description:$id@${nodes.map(x => s"${x.getHostString}:${x.getPort}").mkString(",")}")
+      pw.close()
+      val fdb = DefaultDatabase(FDB.selectAPIVersion(510).open(clusterFileName))
+      new Transactor[F](fdb)
+    }
+  def create[F[_]](implicit F: ConcurrentEffect[F]): F[Transactor[F]] =
+    F.delay {
+      val fdb = DefaultDatabase(FDB.selectAPIVersion(510).open())
+      new Transactor[F](fdb)
+    }
+}
